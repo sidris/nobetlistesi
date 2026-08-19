@@ -8,6 +8,24 @@ from schedule import generate, move_task, recompute_counts, weeks_meta
 
 st.set_page_config(page_title="Nöbet Çizelgesi", page_icon="🗓️", layout="wide")
 
+# ---------------- Giriş kapısı (görüntüleme şifresi) ----------------
+# Şifre girilmeden hiçbir şey (çizelge/isimler) görünmez.
+if not st.session_state.get("view_ok"):
+    try:
+        _want = st.secrets.get("VIEW_PASSWORD", "") or st.secrets.get("ADMIN_PASSWORD", "")
+    except Exception:
+        _want = ""
+    st.markdown("## 🔒 Nöbet Çizelgesi")
+    st.caption("Bu sayfayı görüntülemek için şifre girin.")
+    _pw = st.text_input("Şifre", type="password", key="viewpw")
+    if st.button("Giriş"):
+        if _pw and _want and _pw == _want:
+            st.session_state["view_ok"] = True
+            st.rerun()
+        else:
+            st.error("Şifre yanlış.")
+    st.stop()
+
 # ---------------- Renkler ----------------
 PALETTE = [
     ("#e7f0ff", "#1d4ed8"), ("#e6f7ef", "#0a7d52"), ("#fdeede", "#b54708"),
