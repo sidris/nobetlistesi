@@ -46,11 +46,11 @@ def default_state():
     return {
         "people": ["Özlem", "Batuhan", "Begüm", "Evrim", "Furkan", "Göksu", "Mine"],
         "tasks": [
-            {"name": "Bloomberg", "count": 1, "weight": 10, "channel": True, "exclusive": False},
+            {"name": "Bloomberg", "count": 1, "weight": 10, "channel": True, "exclusive": False, "protected": True},
             {"name": "NTV", "count": 1, "weight": 3, "channel": True, "exclusive": False},
             {"name": "A Para", "count": 1, "weight": 5, "channel": True, "exclusive": False},
             {"name": "UBB", "count": 1, "weight": 5, "channel": False, "exclusive": False},
-            {"name": "CNBC-e + Medya Özeti", "count": 1, "weight": 5, "channel": True, "exclusive": False},
+            {"name": "CNBC-e + Medya Özeti", "count": 1, "weight": 5, "channel": True, "exclusive": False, "protected": True},
             {"name": "CNN + YouTube", "count": 1, "weight": 5, "channel": True, "exclusive": False},
             {"name": "TRT", "count": 1, "weight": 5, "channel": False, "exclusive": False},
             {"name": "X Takibi", "count": 1, "weight": 10, "channel": False, "exclusive": True},
@@ -70,6 +70,8 @@ def normalize(state):
     for t in state.get("tasks", []):
         t.setdefault("count", 1); t.setdefault("weight", 5)
         t.setdefault("channel", False); t.setdefault("exclusive", False)
+        if "protected" not in t:
+            t["protected"] = t["name"] in {"Bloomberg", "CNBC-e + Medya Özeti"}
         if t.get("channel"):
             t["count"] = 1  # kanal her zaman 1 kişi
     state.setdefault("exclusions", {}); state.setdefault("conflicts", [])
@@ -292,18 +294,21 @@ with tabs[1]:
         pdf2 = st.data_editor(pdf, num_rows="dynamic", use_container_width=True, key="ppl")
         st.subheader("Görevler")
         tdf = pd.DataFrame(S["tasks"])
-        for c in ["count", "weight", "channel", "exclusive"]:
+        for c in ["count", "weight", "channel", "exclusive", "protected"]:
             if c not in tdf:
-                tdf[c] = 0
+                tdf[c] = False if c in ("channel", "exclusive", "protected") else 0
         tdf = tdf.rename(columns={"name": "İş", "count": "kişi", "weight": "ağırlık",
-                                  "channel": "kanal", "exclusive": "yalnız"})
-        tdf = tdf[["İş", "kişi", "ağırlık", "kanal", "yalnız"]]
+                                  "channel": "kanal", "exclusive": "yalnız", "protected": "öncelikli"})
+        tdf = tdf[["İş", "kişi", "ağırlık", "kanal", "yalnız", "öncelikli"]]
         tdf2 = st.data_editor(tdf, num_rows="dynamic", use_container_width=True, key="tsk",
                               column_config={
                                   "kanal": st.column_config.CheckboxColumn(),
                                   "yalnız": st.column_config.CheckboxColumn(),
+                                  "öncelikli": st.column_config.CheckboxColumn(
+                                      help="Bu iş üst üste aynı kişiye gelmez ve tek kanal kalır (ör. Bloomberg, CNBC-e)."),
                               })
-        st.caption("kanal = her hafta 1 kişi, herkese sırayla. yalnız = o hafta başka iş almaz (ör. X Takibi).")
+        st.caption("kanal = her hafta 1 kişi, herkese sırayla. yalnız = o hafta başka iş almaz (ör. X Takibi). "
+                   "öncelikli = üst üste asla gelmez + tek kanal kalır (kural gevşemelerinden muaf).")
         if st.button("💾 Kişiler & Görevleri kaydet"):
             S["people"] = [str(x).strip() for x in pdf2["İsim"].tolist() if str(x).strip()]
             new_tasks = []
@@ -314,6 +319,7 @@ with tabs[1]:
                 new_tasks.append({
                     "name": nm, "count": int(r["kişi"] or 1), "weight": int(r["ağırlık"] or 5),
                     "channel": bool(r["kanal"]), "exclusive": bool(r["yalnız"]),
+                    "protected": bool(r["öncelikli"]),
                 })
             S["tasks"] = new_tasks
             normalize(S)
