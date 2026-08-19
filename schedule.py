@@ -43,6 +43,8 @@ def generate(state):
             conflict_map[a].add(b)
             conflict_map[b].add(a)
     channel_set = {t["name"] for t in tasks if t.get("channel")}
+    DEFAULT_PROTECTED = {"Bloomberg", "CNBC-e + Medya Özeti"}
+    protected_set = {t["name"] for t in tasks if t.get("protected") or t["name"] in DEFAULT_PROTECTED}
 
     singles = [t for t in tasks if not t.get("pair")]
     singles.sort(key=lambda t: (0 if t.get("exclusive") else 1,
@@ -75,18 +77,27 @@ def generate(state):
                     return False
                 if p in holders[t["name"]]:
                     return False
-                if lv < 3 and p in excl.get(t["name"], []):
-                    return False
-                if lv < 1 and t["name"] in prev_assign[p]:
-                    return False
-                if lv < 2:
+                if p in excl.get(t["name"], []):
+                    return False  # yasak: hiç gevşemez
+                # aynı iş iki hafta üst üste
+                if t["name"] in prev_assign[p]:
+                    if t["name"] in protected_set:
+                        return False  # Bloomberg/CNBC-e: kesin, asla üst üste
+                    elif lv < 1:
+                        return False  # diğerleri: ilk gevşer (Mine+TRT üst üste olabilir)
+                # çakışma
+                if lv < 1:
                     for x in this_week[p]:
                         if x in conflict_map[t["name"]]:
                             return False
-                if lv < 2 and t.get("channel"):
-                    for x in this_week[p]:
-                        if x in channel_set:
-                            return False
+                # kişi başına 1 kanal
+                if t.get("channel"):
+                    exist = [x for x in this_week[p] if x in channel_set]
+                    if exist:
+                        if t["name"] in protected_set or any(x in protected_set for x in exist):
+                            return False  # Bloomberg/CNBC-e tek kanal kalır: gevşemez
+                        elif lv < 2:
+                            return False  # diğer kanallar: en son gevşer
                 return True
 
             def cmp_key(p, t):
@@ -95,12 +106,11 @@ def generate(state):
                 return (task_cnt[p][t["name"]], lt, len(this_week[p]), ww, people.index(p))
 
             def pickS(t):
-                for lv in range(4):
+                for lv in range(3):
                     c = [p for p in people if valid(p, t, lv)]
                     if c:
-                        if lv > 0 and collect_warn:
-                            msg = {1: "ardışık-tekrar", 2: "çakışma/kanal", 3: "yasak"}[lv]
-                            warnings.append(f"Hafta {wk['no']}: “{t['name']}” {msg} kuralı gevşetildi.")
+                        if lv >= 2 and collect_warn:
+                            warnings.append(f"Hafta {wk['no']}: “{t['name']}” için kişi-başına-1-kanal gevşetildi.")
                         c.sort(key=lambda p: cmp_key(p, t))
                         return c[0]
                 return None
