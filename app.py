@@ -451,21 +451,27 @@ with tabs[5]:
         st.info("Düzenlemek için şifreyle açın.")
     else:
         a1, a2, a3 = st.columns(3)
-        sd = a1.date_input("Başlangıç tarihi", value=datetime.fromisoformat(S["startDate"]).date())
-        wc = a2.number_input("Hafta sayısı", 1, 104, int(S["weekCount"]))
-        sw = a3.number_input("İlk hafta no", 1, 53, int(S["startWeekNo"]))
-        if st.button("Ayarları kaydet"):
+        sd = a1.date_input("Başlangıç tarihi", value=datetime.fromisoformat(S["startDate"]).date(), key="set_sd")
+        wc = a2.number_input("Hafta sayısı", 1, 104, int(S["weekCount"]), key="set_wc")
+        sw = a3.number_input("İlk hafta no", 1, 53, int(S["startWeekNo"]), key="set_sw")
+
+        def apply_settings():
             S["startDate"] = sd.isoformat(); S["weekCount"] = int(wc); S["startWeekNo"] = int(sw)
-            # geçersiz izin/not temizle
             S["leave"] = [k for k in S["leave"] if int(k.split("::")[0]) < S["weekCount"]]
+
+        if st.button("Ayarları kaydet"):
+            apply_settings()
             persist(); st.success("Ayarlar kaydedildi.")
         st.divider()
         st.subheader("Çizelgeyi oluştur")
-        st.caption("Tüm kural ve ayarlarla baştan üretir (izin devri dahil). "
+        st.caption("Ekrandaki güncel ayar ve kurallarla baştan üretir (izin devri dahil). "
                    "Elle taşımalar sıfırlanır.")
         if st.button("🔄 Oluştur & Kaydet", type="primary"):
+            apply_settings()          # ekrandaki güncel ayarları uygula
             normalize(S)
             res = generate(S)
             S["schedule"] = res
             persist()
-            st.success("Çizelge oluşturuldu ve kaydedildi.")
+            st.success(f"Çizelge oluşturuldu ve kaydedildi. "
+                       f"({S['weekCount']} hafta, ilk hafta no {S['startWeekNo']}, "
+                       f"başlangıç {datetime.fromisoformat(S['startDate']).strftime('%d.%m.%Y')})")
