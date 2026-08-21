@@ -58,7 +58,9 @@ def default_state():
         ],
         "exclusions": {"UBB": ["Begüm", "Özlem"], "NTV": ["Mine"], "CNN + YouTube": ["Mine"],
                        "Bloomberg": ["Mine"], "CNBC-e + Medya Özeti": ["Mine"], "A Para": ["Mine"]},
-        "conflicts": [["X Takibi", "CNN + YouTube"], ["UBB", "Bloomberg"], ["UBB", "CNBC-e + Medya Özeti"]],
+        "conflicts": [["UBB", "CNBC-e + Medya Özeti"]],
+        "softConflicts": [["UBB", "Bloomberg"]],
+        "cyclicTasks": ["X Takibi", "NTV", "Bloomberg", "CNN + YouTube", "CNBC-e + Medya Özeti", "A Para"],
         "peers": [["Begüm", "Özlem"], ["Evrim", "Göksu"], ["Furkan", "Mine"]],
         "peerGap": 2,
         "startDate": "2026-06-15", "weekCount": 12, "startWeekNo": 24,
@@ -76,6 +78,13 @@ def normalize(state):
             t["count"] = 1  # kanal her zaman 1 kişi
     state.setdefault("exclusions", {}); state.setdefault("conflicts", [])
     state.setdefault("peers", []); state.setdefault("leave", []); state.setdefault("notes", {})
+    # göç: UBB+Bloomberg artık soft; döngü listesi
+    if "softConflicts" not in state:
+        state["softConflicts"] = [["UBB", "Bloomberg"]]
+        state["conflicts"] = [pr for pr in state.get("conflicts", []) if set(pr) != {"UBB", "Bloomberg"}]
+    if "cyclicTasks" not in state:
+        state["cyclicTasks"] = ["X Takibi", "NTV", "Bloomberg", "CNN + YouTube",
+                                "CNBC-e + Medya Özeti", "A Para"]
     return state
 
 
