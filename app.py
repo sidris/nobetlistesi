@@ -85,6 +85,17 @@ def normalize(state):
     if "cyclicTasks" not in state:
         state["cyclicTasks"] = ["X Takibi", "NTV", "Bloomberg", "CNN + YouTube",
                                 "CNBC-e + Medya Özeti", "A Para"]
+    # geçersiz referansları temizle (silinmiş kişi/görev)
+    vp = set(state.get("people", []))
+    tn = {t["name"] for t in state.get("tasks", [])}
+    state["exclusions"] = {k: [p for p in v if p in vp]
+                           for k, v in state.get("exclusions", {}).items() if k in tn}
+    state["conflicts"] = [pr for pr in state.get("conflicts", []) if pr[0] in tn and pr[1] in tn]
+    state["softConflicts"] = [pr for pr in state.get("softConflicts", []) if pr[0] in tn and pr[1] in tn]
+    state["peers"] = [pr for pr in state.get("peers", []) if pr[0] in vp and pr[1] in vp]
+    state["leave"] = [k for k in state.get("leave", []) if k.split("::", 1)[-1] in vp]
+    state["cyclicTasks"] = [c for c in state.get("cyclicTasks", []) if c in tn]
+    state["notes"] = {k: v for k, v in state.get("notes", {}).items() if k.split("::", 1)[-1] in vp}
     return state
 
 
@@ -343,7 +354,7 @@ with tabs[2]:
         st.subheader("Kim hangi işi yapamaz (yasaklar)")
         changed = False
         for t in S["tasks"]:
-            cur = S["exclusions"].get(t["name"], [])
+            cur = [p for p in S["exclusions"].get(t["name"], []) if p in S["people"]]
             sel = st.multiselect(t["name"], S["people"], default=cur, key="ex_" + t["name"])
             if set(sel) != set(cur):
                 if sel:
