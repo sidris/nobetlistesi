@@ -57,6 +57,10 @@ def generate(state):
 
     # döngüsel işleri yapabilen kişiler (hiçbirinden yasaklı değil) — sıralı
     cyclic_people = [p for p in people if all(p not in excl.get(c, []) for c in cyclic_tasks)]
+    non_cyc_people = [p for p in people if p not in cyclic_people]  # ör. Mine
+    excl_cyclic = [c for c in cyclic_tasks if task_by.get(c, {}).get("exclusive")]
+    x_name = excl_cyclic[0] if excl_cyclic else None  # X Takibi
+    period = n_cyc + 1  # döngü-dışı kişilere X sırası açmak için (6 iş -> her 7. hafta)
 
     non_cyclic = [t for t in tasks if t["name"] not in cyclic_set]
     # önce sert-çakışmalı (UBB), sonra tekil, sonra çoklu (Basın Özeti)
@@ -83,6 +87,19 @@ def generate(state):
                 continue  # kişi sayısı > görev sayısı olursa çakışmayı atla
             assign[p].append(tname); taken.add(tname)
             taskCnt[p][tname] += 1; lastTW[p][tname] = w
+
+        # ---- Döngü-dışı kişiye (Mine) periyodik X Takibi ----
+        # Her 'period'. haftada X'i döngü-dışı bir kişi devralır; o haftaki cyclic X-kişisi
+        # X'ten düşer (döngüsel-olmayan işe kayar). Böylece X herkese eşit dağılır.
+        if x_name and non_cyc_people and (w % period == n_cyc):
+            xtaker = non_cyc_people[(w // period) % len(non_cyc_people)]
+            if xtaker not in excl.get(x_name, []):
+                holders = [p for p in cyclic_people if x_name in assign[p]]
+                if holders:
+                    dp = holders[0]
+                    assign[dp].remove(x_name); taskCnt[dp][x_name] -= 1
+                    assign[xtaker].append(x_name); taskCnt[xtaker][x_name] += 1
+                    lastTW[xtaker][x_name] = w
 
         def has_exclusive(p):
             return any(task_by.get(x, {}).get("exclusive") for x in assign[p])
