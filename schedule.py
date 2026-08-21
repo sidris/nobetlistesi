@@ -27,219 +27,114 @@ def generate(state):
     people = list(state["people"])
     tasks = state["tasks"]
     excl = state.get("exclusions", {}) or {}
-    conflicts = state.get("conflicts", []) or []
-    peers = state.get("peers", []) or []
-    gap = state.get("peerGap", 0) or 0
-    pins = state.get("pins", {}) or {}
+    hard_conf = state.get("conflicts", []) or []
+    soft_conf = state.get("softConflicts", []) or []
     leave = set(state.get("leave", []) or [])
     weeks = weeks_meta(state)
 
     Wmap = {t["name"]: _weight(t) for t in tasks}
     Wn = lambda n: Wmap.get(n, 5)
-    conflict_map = {t["name"]: set() for t in tasks}
-    for pr in conflicts:
-        a, b = pr[0], pr[1]
-        if a in conflict_map and b in conflict_map:
-            conflict_map[a].add(b)
-            conflict_map[b].add(a)
+    task_by = {t["name"]: t for t in tasks}
+    names = [t["name"] for t in tasks]
     channel_set = {t["name"] for t in tasks if t.get("channel")}
-    DEFAULT_PROTECTED = {"Bloomberg", "CNBC-e + Medya Özeti"}
-    protected_set = {t["name"] for t in tasks if t.get("protected") or t["name"] in DEFAULT_PROTECTED}
 
-    singles = [t for t in tasks if not t.get("pair")]
-    singles.sort(key=lambda t: (0 if t.get("exclusive") else 1,
-                                0 if t.get("channel") else 1,
-                                -_weight(t)))
-    pair_tasks = [t for t in tasks if t.get("pair")]
+    default_cyclic = ["X Takibi", "NTV", "Bloomberg", "CNN + YouTube",
+                      "CNBC-e + Medya Özeti", "A Para"]
+    cyclic_tasks = [c for c in (state.get("cyclicTasks") or default_cyclic) if c in names]
+    n_cyc = len(cyclic_tasks)
+    cyclic_set = set(cyclic_tasks)
 
+    hard_map = {n: set() for n in names}
+    for pr in hard_conf:
+        a, b = pr[0], pr[1]
+        if a in hard_map and b in hard_map:
+            hard_map[a].add(b); hard_map[b].add(a)
+    soft_map = {n: set() for n in names}
+    for pr in soft_conf:
+        a, b = pr[0], pr[1]
+        if a in soft_map and b in soft_map:
+            soft_map[a].add(b); soft_map[b].add(a)
+
+    # döngüsel işleri yapabilen kişiler (hiçbirinden yasaklı değil) — sıralı
+    cyclic_people = [p for p in people if all(p not in excl.get(c, []) for c in cyclic_tasks)]
+
+    non_cyclic = [t for t in tasks if t["name"] not in cyclic_set]
+    # önce sert-çakışmalı (UBB), sonra tekil, sonra çoklu (Basın Özeti)
+    non_cyclic.sort(key=lambda t: (0 if hard_map[t["name"]] else 1,
+                                   (t.get("count") or 1), -_weight(t)))
+
+    taskCnt = {p: {n: 0 for n in names} for p in people}
+    lastTW = {p: {} for p in people}
+    prev_assign = {p: [] for p in people}
     warnings = []
 
-    def build_base(use_pins, collect_warn):
-        task_cnt = {p: {t["name"]: 0 for t in tasks} for p in people}
-        last_tw = {p: {} for p in people}
-        prev_assign = {p: [] for p in people}
-        pair_count = {f"{a}|{b}": 0 for a, b in peers}
-        last_pair_week = {}
-        x_ptr = [0]
-        rows = []
+    base_rows = []
+    for wk in weeks:
+        w = wk["idx"]
+        assign = {p: [] for p in people}
 
-        for wk in weeks:
-            w = wk["idx"]
-            this_week = {p: [] for p in people}
-            has_excl = {}
-            holders = {t["name"]: [] for t in tasks}
-            pair_used = {}
+        # ---- DÖNGÜSEL FAZ ----
+        taken = set()
+        for pos, p in enumerate(cyclic_people):
+            if n_cyc == 0:
+                break
+            tname = cyclic_tasks[(pos - w) % n_cyc]
+            if tname in taken:
+                continue  # kişi sayısı > görev sayısı olursa çakışmayı atla
+            assign[p].append(tname); taken.add(tname)
+            taskCnt[p][tname] += 1; lastTW[p][tname] = w
 
-            def valid(p, t, lv):
-                if has_excl.get(p):
-                    return False
-                if t.get("exclusive") and this_week[p]:
-                    return False
-                if p in holders[t["name"]]:
-                    return False
-                if p in excl.get(t["name"], []):
-                    return False  # yasak: hiç gevşemez
-                # aynı iş iki hafta üst üste
-                if t["name"] in prev_assign[p]:
-                    if t["name"] in protected_set:
-                        return False  # Bloomberg/CNBC-e: kesin, asla üst üste
-                    elif lv < 1:
-                        return False  # diğerleri: ilk gevşer (Mine+TRT üst üste olabilir)
-                # çakışma
-                if lv < 1:
-                    for x in this_week[p]:
-                        if x in conflict_map[t["name"]]:
-                            return False
-                # kişi başına 1 kanal
-                if t.get("channel"):
-                    exist = [x for x in this_week[p] if x in channel_set]
-                    if exist:
-                        if t["name"] in protected_set or any(x in protected_set for x in exist):
-                            return False  # Bloomberg/CNBC-e tek kanal kalır: gevşemez
-                        elif lv < 2:
-                            return False  # diğer kanallar: en son gevşer
-                return True
+        def has_exclusive(p):
+            return any(task_by.get(x, {}).get("exclusive") for x in assign[p])
 
-            def cmp_key(p, t):
-                lt = last_tw[p].get(t["name"], -999)
-                ww = sum(Wn(x) for x in this_week[p])
-                return (task_cnt[p][t["name"]], lt, len(this_week[p]), ww, people.index(p))
+        # ---- DÖNGÜSEL OLMAYANLAR (UBB, TRT, Basın Özeti) ----
+        def eligible(p, t, lv):
+            if has_exclusive(p):
+                return False
+            if p in excl.get(t["name"], []):
+                return False  # yasak: firm
+            if t["name"] in assign[p]:
+                return False
+            for x in assign[p]:
+                if x in hard_map[t["name"]]:
+                    return False  # sert çakışma (ör. UBB + CNBC-e): firm
+            if t["name"] in prev_assign[p] and lv < 1:
+                return False  # üst üste: ilk gevşer (Mine+TRT dahil)
+            return True
 
-            def pickS(t):
-                for lv in range(3):
-                    c = [p for p in people if valid(p, t, lv)]
+        def key(p, t):
+            soft_pen = 1 if any(x in soft_map[t["name"]] for x in assign[p]) else 0
+            lt = lastTW[p].get(t["name"], -999)
+            return (taskCnt[p][t["name"]], len(assign[p]), soft_pen, lt, people.index(p))
+
+        for t in non_cyclic:
+            need = (t.get("count") or 1)
+            placed = 0
+            while placed < need:
+                picked = None
+                for lv in range(2):
+                    c = [p for p in people if eligible(p, t, lv)]
                     if c:
-                        if lv >= 2 and collect_warn:
-                            warnings.append(f"Hafta {wk['no']}: “{t['name']}” için kişi-başına-1-kanal gevşetildi.")
-                        c.sort(key=lambda p: cmp_key(p, t))
-                        return c[0]
-                return None
-
-            def do_assign(p, t):
-                this_week[p].append(t["name"])
-                task_cnt[p][t["name"]] += 1
-                last_tw[p][t["name"]] = w
-                holders[t["name"]].append(p)
-                if t.get("exclusive"):
-                    has_excl[p] = True
-
-            # pin fazı
-            if use_pins:
-                for t in tasks:
-                    cap = 1 if t.get("channel") else (t.get("count") or 1)
-                    for p in [x for x in pins.get(f"{w}::{t['name']}", []) if x in people]:
-                        if not t.get("pair") and len(holders[t["name"]]) >= cap:
-                            continue
-                        if p in holders[t["name"]]:
-                            continue
-                        if has_excl.get(p):
-                            continue
-                        if t.get("exclusive") and this_week[p]:
-                            continue
-                        do_assign(p, t)
-
-            excl_s = [t for t in singles if t.get("exclusive")]
-            chan_s = [t for t in singles if t.get("channel") and not t.get("exclusive")]
-            other_s = [t for t in singles if not t.get("channel") and not t.get("exclusive")]
-
-            def pick_excl(t):
-                n = len(people)
-                for k in range(n):
-                    idx = (x_ptr[0] + k) % n
-                    p = people[idx]
-                    if p in excl.get(t["name"], []):
-                        continue
-                    if has_excl.get(p):
-                        continue
-                    if this_week[p]:
-                        continue
-                    if p in holders[t["name"]]:
-                        continue
-                    x_ptr[0] = (idx + 1) % n
-                    return p
-                return None
-
-            for t in excl_s:
-                need = t.get("count") or 1
-                while len(holders[t["name"]]) < need:
-                    pk = pick_excl(t)
-                    if pk is None:
-                        if collect_warn:
-                            warnings.append(f"Hafta {wk['no']}: “{t['name']}” atanamadı.")
+                        c.sort(key=lambda p: key(p, t))
+                        picked = c[0]
                         break
-                    do_assign(pk, t)
+                if picked is None:
+                    warnings.append(f"Hafta {wk['no']}: “{t['name']}” yerleştirilemedi.")
+                    break
+                assign[picked].append(t["name"])
+                taskCnt[picked][t["name"]] += 1
+                lastTW[picked][t["name"]] = w
+                placed += 1
 
-            sh = (w % len(chan_s)) if chan_s else 0
-            rot_c = chan_s[sh:] + chan_s[:sh]
-            for t in rot_c + other_s:
-                need = 1 if t.get("channel") else (t.get("count") or 1)
-                while len(holders[t["name"]]) < need:
-                    pk = pickS(t)
-                    if pk is None:
-                        break
-                    do_assign(pk, t)
+        for p in people:
+            prev_assign[p] = assign[p][:]
+        base_rows.append({"no": wk["no"], "dateStr": wk["date"].strftime("%d.%m.%Y"),
+                          "idx": w, "assign": {p: assign[p][:] for p in people}})
 
-            # çift işleri
-            def pair_elig(pr, t, relax_gap):
-                key = f"{pr[0]}|{pr[1]}"
-                if pair_used.get(key):
-                    return False
-                for m in pr:
-                    if m in excl.get(t["name"], []):
-                        return False
-                    if has_excl.get(m):
-                        return False
-                    if m in holders[t["name"]]:
-                        return False
-                    for x in this_week[m]:
-                        if x in conflict_map[t["name"]]:
-                            return False
-                if (not relax_gap) and gap > 0 and key in last_pair_week and (w - last_pair_week[key]) < gap:
-                    return False
-                return True
-
-            for t in pair_tasks:
-                total_need = (t.get("count") or 1) * 2
-                if len(holders[t["name"]]) > 0:
-                    while len(holders[t["name"]]) < total_need:
-                        c = [p for p in people if not has_excl.get(p) and p not in holders[t["name"]]]
-                        if not c:
-                            break
-                        c.sort(key=lambda p: cmp_key(p, t))
-                        do_assign(c[0], t)
-                    continue
-                pps = t.get("count") or 1
-                for _ in range(pps):
-                    picked = None
-                    for rg in range(2):
-                        if picked:
-                            break
-                        cand = [pr for pr in peers if pair_elig(pr, t, rg == 1)]
-                        if cand:
-                            cand.sort(key=lambda A: (pair_count[f"{A[0]}|{A[1]}"],
-                                                     last_pair_week.get(f"{A[0]}|{A[1]}", -99),
-                                                     peers.index(A)))
-                            picked = cand[0]
-                    if picked:
-                        key = f"{picked[0]}|{picked[1]}"
-                        for m in picked:
-                            do_assign(m, t)
-                        pair_used[key] = True
-                        pair_count[key] += 1
-                        last_pair_week[key] = w
-
-            for p in people:
-                prev_assign[p] = this_week[p][:]
-            rows.append({"no": wk["no"], "dateStr": wk["date"].strftime("%d.%m.%Y"),
-                         "idx": w, "assign": {p: this_week[p][:] for p in people}})
-        return rows
-
-    pinned_base = build_base(True, True)
-    struck = {}  # elle taşımalar move_task ile eklenir (cerrahi)
-
-    # izin overlay (cerrahi)
+    # ---- İZİN OVERLAY (cerrahi) ----
+    struck = {}
     rows = []
-    for br in pinned_base:
+    for br in base_rows:
         w = br["idx"]
         assign = {p: br["assign"][p][:] for p in people}
         on_leave = [p for p in people if f"{w}::{p}" in leave]
@@ -272,9 +167,8 @@ def generate(state):
         rows.append({"no": br["no"], "dateStr": br["dateStr"], "idx": w,
                      "assign": assign, "onLeave": on_leave})
 
-    # sayımlar: herkes × her iş
-    tnames = [t["name"] for t in tasks]
-    counts = {p: {tn: 0 for tn in tnames} for p in people}
+    # ---- sayımlar ----
+    counts = {p: {n: 0 for n in names} for p in people}
     totals = {p: 0 for p in people}
     for row in rows:
         for p in people:
@@ -282,15 +176,8 @@ def generate(state):
                 counts[p][tn] = counts[p].get(tn, 0) + 1
                 totals[p] += 1
 
-    return {
-        "rows": rows,
-        "struck": struck,
-        "warnings": warnings,
-        "counts": counts,
-        "totals": totals,
-        "people": people,
-        "taskNames": tnames,
-    }
+    return {"rows": rows, "struck": struck, "warnings": warnings,
+            "counts": counts, "totals": totals, "people": people, "taskNames": names}
 
 
 def recompute_counts(sched):
