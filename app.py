@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import io
 import copy
 from datetime import datetime, timezone
@@ -147,7 +148,7 @@ def persist():
 
 
 def week_labels():
-    return [f"Hafta {wk['no']} — {wk['date'].strftime('%d.%m.%Y')}" for wk in weeks_meta(S)]
+    return [f"Hafta {wk['no']} - {wk['date'].strftime('%d.%m.%Y')}" for wk in weeks_meta(S)]
 
 
 # ---------------- Başlık + kilit ----------------
@@ -255,7 +256,7 @@ def render_balance():
         rowd["Toplam"] = sched.get("totals", {}).get(p, 0)
         data.append(rowd)
     df = pd.DataFrame(data).set_index("Kişi")
-    st.markdown("#### Yük dengesi — herkesin her işi kaç kez yaptığı")
+    st.markdown("#### Yük dengesi - herkesin her işi kaç kez yaptığı")
     st.dataframe(df, use_container_width=True)
 
 
@@ -377,7 +378,7 @@ with tabs[2]:
             if cx2.button("Kaldır", key="rmcf" + str(i)):
                 S["conflicts"].pop(i); changed = True; st.rerun()
         st.divider()
-        st.subheader("Peer (eş) çiftleri — çift işleri ve eş kuralı için")
+        st.subheader("Peer (eş) çiftleri - çift işleri ve eş kuralı için")
         pp1, pp2, pp3 = st.columns([2, 2, 1])
         pa = pp1.selectbox("Kişi 1", S["people"], key="pra")
         pb = pp2.selectbox("Kişi 2", S["people"], key="prb")
@@ -413,7 +414,7 @@ with tabs[3]:
             wi, pn = k.split("::"); wi = int(wi)
             if wi < len(labels):
                 lx1, lx2 = st.columns([4, 1])
-                lx1.write(f"• {pn} — {labels[wi]}")
+                lx1.write(f"• {pn} - {labels[wi]}")
                 if lx2.button("Kaldır", key="rmlv" + k):
                     S["leave"].remove(k); persist(); st.rerun()
         st.divider()
@@ -445,7 +446,7 @@ with tabs[4]:
         labels = week_labels()
         sched = S["schedule"]
         mw = st.selectbox("Hafta", list(range(len(sched["rows"]))),
-                          format_func=lambda i: f"Hafta {sched['rows'][i]['no']} — {sched['rows'][i]['dateStr']}", key="mvw")
+                          format_func=lambda i: f"Hafta {sched['rows'][i]['no']} - {sched['rows'][i]['dateStr']}", key="mvw")
         row = sched["rows"][mw]
         # o haftada atanmış (kişi, iş) çiftleri
         pairs = []
