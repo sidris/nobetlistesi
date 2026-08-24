@@ -14,6 +14,9 @@ from datetime import date, timedelta
 
 LIGHT = {"CNN + YouTube", "NTV", "A Para"}
 DEFAULT_PROTECTED = {"Bloomberg", "CNBC-e + Medya Özeti"}
+# Kanal atama onceligi tiers: X ayrica (exclusive) ilk. Sonra:
+CHANNEL_PRIORITY = {"Bloomberg": 0, "CNBC-e + Medya Özeti": 1, "CNN + YouTube": 2}
+# (NTV, A Para ve digerleri ayni alt tier=3; kendi aralarinda dengeli dagilir)
 
 
 def _weight(t):
@@ -103,7 +106,9 @@ def generate(state):
 
         matched = {}
         for _relax in (False, True):
-            order2 = sorted(channel_cyclic, key=lambda ch: (0 if ch in protected else 1, len(_cand(ch, _relax))))
+            order2 = sorted(channel_cyclic, key=lambda ch: (
+                CHANNEL_PRIORITY.get(ch, 3),
+                len(_cand(ch, _relax))))
             res = {}
             used = set()
 
