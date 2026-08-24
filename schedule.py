@@ -17,6 +17,8 @@ DEFAULT_PROTECTED = {"Bloomberg", "CNBC-e + Medya Özeti"}
 # Kanal atama onceligi tiers: X ayrica (exclusive) ilk. Sonra:
 CHANNEL_PRIORITY = {"Bloomberg": 0, "CNBC-e + Medya Özeti": 1, "CNN + YouTube": 2}
 # (NTV, A Para ve digerleri ayni alt tier=3; kendi aralarinda dengeli dagilir)
+# Agir kanallar: bir kisi bir hafta agir yaptiysa ertesi hafta mumkunse agir almasin.
+HEAVY = {"Bloomberg", "CNBC-e + Medya Özeti", "CNN + YouTube"}
 
 
 def _weight(t):
@@ -97,18 +99,22 @@ def generate(state):
         # ---- KANALLAR: haftalik eslestirme (tum kanallar yerlesir, ust uste yok, iyi yayilim) ----
         avail_ch = [p for p in people if not has_exclusive(p)]
 
-        def _cand(ch, relax):
+        def _cand(ch, lv):
             cs = [p for p in avail_ch if p not in excl.get(ch, [])]
-            if (not relax) or (ch in protected):
-                cs = [p for p in cs if ch not in prev_assign[p]]  # ust uste yok
-            cs.sort(key=lambda p: (taskCnt[p][ch], lastTW[p].get(ch, -999), people.index(p)))
+            if lv < 2 or ch in protected:
+                cs = [p for p in cs if ch not in prev_assign[p]]  # ayni kanal ust uste yok
+            if lv < 1 and ch in HEAVY:
+                # agir kanal, gecen hafta agir yapana verilmesin
+                cs = [p for p in cs if not any(x in HEAVY for x in prev_assign[p])]
+            cs.sort(key=lambda p: (
+                1 if (ch in HEAVY and any(x in HEAVY for x in prev_assign[p])) else 0,  # agir ust uste minimize
+                taskCnt[p][ch], lastTW[p].get(ch, -999), people.index(p)))
             return cs
 
         matched = {}
-        for _relax in (False, True):
+        for _lv in (0, 1, 2):
             order2 = sorted(channel_cyclic, key=lambda ch: (
-                CHANNEL_PRIORITY.get(ch, 3),
-                len(_cand(ch, _relax))))
+                CHANNEL_PRIORITY.get(ch, 3), len(_cand(ch, _lv))))
             res = {}
             used = set()
 
@@ -116,7 +122,7 @@ def generate(state):
                 if i == len(order2):
                     return True
                 ch = order2[i]
-                for p in _cand(ch, _relax):
+                for p in _cand(ch, _lv):
                     if p in used:
                         continue
                     res[ch] = p
@@ -129,8 +135,8 @@ def generate(state):
 
             if _bt(0):
                 matched = res
-                if _relax:
-                    warnings.append(f"Hafta {wk['no']}: kanal ust-uste kurali gevsetildi.")
+                if _lv >= 2:
+                    warnings.append(f"Hafta {wk['no']}: kanal ust-uste gevsetildi.")
                 break
         if not matched:
             warnings.append(f"Hafta {wk['no']}: bazi kanallar yerlestirilemedi.")
