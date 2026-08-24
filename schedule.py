@@ -91,48 +91,46 @@ def generate(state):
         if x_name and x_people:
             do_assign(x_people[w % len(x_people)], x_name)
 
-        # ---- KANALLAR: adil round-robin ----
-        def elig_ch(p, tname, lv):
-            if has_exclusive(p):
-                return False
-            if p in excl.get(tname, []):
-                return False
-            if tname in assign[p]:
-                return False
-            exist = [x for x in assign[p] if x in channel_set]
-            if exist:
-                if tname in protected or any(x in protected for x in exist):
-                    return False
-                elif lv < 2:
-                    return False
-            if tname in prev_assign[p]:
-                if tname in protected:
-                    return False
-                elif lv < 1:
-                    return False
-            return True
+        # ---- KANALLAR: haftalik eslestirme (tum kanallar yerlesir, ust uste yok, iyi yayilim) ----
+        avail_ch = [p for p in people if not has_exclusive(p)]
 
-        def key_ch(p, tname):
-            lt = lastTW[p].get(tname, -999)
-            return (taskCnt[p][tname], lt, len(assign[p]),
-                    sum(Wn(x) for x in assign[p]), people.index(p))
+        def _cand(ch, relax):
+            cs = [p for p in avail_ch if p not in excl.get(ch, [])]
+            if (not relax) or (ch in protected):
+                cs = [p for p in cs if ch not in prev_assign[p]]  # ust uste yok
+            cs.sort(key=lambda p: (taskCnt[p][ch], lastTW[p].get(ch, -999), people.index(p)))
+            return cs
 
-        order = channel_cyclic[:]
-        if order:
-            sh = w % len(order)
-            order = order[sh:] + order[:sh]
-        for tname in order:
-            picked = None
-            for lv in range(3):
-                c = [p for p in people if elig_ch(p, tname, lv)]
-                if c:
-                    if lv >= 2:
-                        warnings.append(f"Hafta {wk['no']}: '{tname}' kişi-başına-1-kanal gevşetildi.")
-                    c.sort(key=lambda p: key_ch(p, tname))
-                    picked = c[0]
-                    break
-            if picked is not None:
-                do_assign(picked, tname)
+        matched = {}
+        for _relax in (False, True):
+            order2 = sorted(channel_cyclic, key=lambda ch: (0 if ch in protected else 1, len(_cand(ch, _relax))))
+            res = {}
+            used = set()
+
+            def _bt(i):
+                if i == len(order2):
+                    return True
+                ch = order2[i]
+                for p in _cand(ch, _relax):
+                    if p in used:
+                        continue
+                    res[ch] = p
+                    used.add(p)
+                    if _bt(i + 1):
+                        return True
+                    del res[ch]
+                    used.discard(p)
+                return False
+
+            if _bt(0):
+                matched = res
+                if _relax:
+                    warnings.append(f"Hafta {wk['no']}: kanal ust-uste kurali gevsetildi.")
+                break
+        if not matched:
+            warnings.append(f"Hafta {wk['no']}: bazi kanallar yerlestirilemedi.")
+        for ch, p in matched.items():
+            do_assign(p, ch)
 
         # ---- DÖNGÜSEL OLMAYANLAR (UBB, TRT, Basın Özeti) ----
         def elig_nc(p, t, lv):
