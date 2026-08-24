@@ -155,7 +155,7 @@ def week_labels():
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("🗓️ Nöbet Çizelgesi")
-    st.caption("Haftalık görev dağıtımı · sırayla eşit · ortak (Supabase)")
+    st.caption("Haftalık görev dağıtımı · sırayla eşit · ortak")
 with c2:
     if st.session_state["unlocked"]:
         st.success("Düzenleme açık")
